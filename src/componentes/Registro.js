@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { View, TextInput, Button, Text, StyleSheet, Alert } from 'react-native';
+import { View, TextInput, Text, Alert, ScrollView, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useNavigation } from '@react-navigation/native';
+import { estilos, colores } from '../tema';
 
 export default function Registro() {
   const [nombre, setNombre] = useState('');
@@ -39,26 +41,38 @@ export default function Registro() {
     }
   };
 
+  const campo = (etiqueta, props) => (
+    <>
+      <Text style={estilos.etiqueta}>{etiqueta}</Text>
+      <TextInput placeholderTextColor={colores.textoSuave} style={estilos.input} {...props} />
+    </>
+  );
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.titulo}>Registro</Text>
+    <ScrollView contentContainerStyle={estilos.pantalla}>
+      <View style={estilos.tarjeta}>
+        <View style={estilos.logo}>
+          <Ionicons name="person-add" size={32} color={colores.primario} />
+        </View>
+        <Text style={estilos.titulo}>Registro</Text>
+        <Text style={estilos.subtitulo}>Crea tu cuenta y empieza a adivinar Digimon</Text>
 
-      <TextInput placeholder="Nombre" value={nombre} onChangeText={setNombre} style={styles.input} />
-      <TextInput placeholder="Correo" value={correo} onChangeText={setCorreo} style={styles.input} />
-      <TextInput placeholder="Contraseña" value={contrasena} onChangeText={setContrasena} secureTextEntry style={styles.input} />
-      <TextInput placeholder="Fecha de nacimiento" value={fecha} onChangeText={setFecha} style={styles.input} />
-      <TextInput placeholder="Teléfono" value={telefono} onChangeText={setTelefono} keyboardType="phone-pad" style={styles.input} />
+        {campo('Nombre', { placeholder: 'Tai Kamiya', value: nombre, onChangeText: setNombre })}
+        {campo('Correo', { placeholder: 'tu@correo.com', value: correo, onChangeText: setCorreo, autoCapitalize: 'none', keyboardType: 'email-address' })}
+        {campo('Contraseña', { placeholder: 'Mínimo 6 caracteres', value: contrasena, onChangeText: setContrasena, secureTextEntry: true })}
+        {campo('Fecha de nacimiento', { placeholder: 'YYYY-MM-DD', value: fecha, onChangeText: setFecha })}
+        {campo('Teléfono', { placeholder: '300 123 4567', value: telefono, onChangeText: setTelefono, keyboardType: 'phone-pad' })}
 
-      <Button title="Registrarse" onPress={handleRegistro} />
-      <View style={{ marginTop: 10 }}>
-        <Button title="¿Ya tienes cuenta? Inicia sesión" onPress={() => navigation.navigate('Login')} />
+        <TouchableOpacity style={estilos.boton} onPress={handleRegistro}>
+          <Text style={estilos.botonTexto}>Registrarse</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={estilos.enlace} onPress={() => navigation.navigate('Login')}>
+          <Text style={estilos.enlaceTexto}>
+            ¿Ya tienes cuenta? <Text style={estilos.enlaceResaltado}>Inicia sesión</Text>
+          </Text>
+        </TouchableOpacity>
       </View>
-    </View>
+    </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
-  titulo: { fontSize: 24, marginBottom: 20, textAlign: 'center' },
-  input: { borderWidth: 1, borderColor: '#ccc', padding: 12, marginBottom: 12, borderRadius: 6 }
-});

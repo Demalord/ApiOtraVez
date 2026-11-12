@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { View, TextInput, Button, Text, StyleSheet, Alert } from 'react-native';
+import { View, TextInput, Text, Alert, ScrollView, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../../firebase/firebaseConfig'; // Ajusta el path si es diferente
 import { useNavigation } from '@react-navigation/native';
+import { estilos, colores } from '../tema';
 
 export default function Login() {
   const [correo, setCorreo] = useState('');
@@ -18,49 +20,45 @@ export default function Login() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.titulo}>Iniciar Sesión</Text>
+    <ScrollView contentContainerStyle={estilos.pantalla}>
+      <View style={estilos.tarjeta}>
+        <View style={estilos.logo}>
+          <Ionicons name="egg" size={36} color={colores.primario} />
+        </View>
+        <Text style={estilos.titulo}>Iniciar Sesión</Text>
+        <Text style={estilos.subtitulo}>Bienvenido de nuevo, Niño Elegido</Text>
 
-      <TextInput
-        placeholder="Correo electrónico"
-        value={correo}
-        onChangeText={setCorreo}
-        style={styles.input}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
-      <TextInput
-        placeholder="Contraseña"
-        value={contrasena}
-        onChangeText={setContrasena}
-        style={styles.input}
-        secureTextEntry
-      />
+        <Text style={estilos.etiqueta}>Correo electrónico</Text>
+        <TextInput
+          placeholder="tu@correo.com"
+          placeholderTextColor={colores.textoSuave}
+          value={correo}
+          onChangeText={setCorreo}
+          style={estilos.input}
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
 
-      <Button title="Ingresar" onPress={handleLogin} />
-      <View style={{ marginTop: 10 }}>
-        <Button title="¿No tienes cuenta? Regístrate" onPress={() => navigation.navigate('Registro')} />
+        <Text style={estilos.etiqueta}>Contraseña</Text>
+        <TextInput
+          placeholder="••••••••"
+          placeholderTextColor={colores.textoSuave}
+          value={contrasena}
+          onChangeText={setContrasena}
+          style={estilos.input}
+          secureTextEntry
+        />
+
+        <TouchableOpacity style={estilos.boton} onPress={handleLogin}>
+          <Text style={estilos.botonTexto}>Ingresar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={estilos.enlace} onPress={() => navigation.navigate('Registro')}>
+          <Text style={estilos.enlaceTexto}>
+            ¿No tienes cuenta? <Text style={estilos.enlaceResaltado}>Regístrate</Text>
+          </Text>
+        </TouchableOpacity>
       </View>
-    </View>
+    </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  titulo: {
-    fontSize: 24,
-    marginBottom: 20,
-    textAlign: 'center'
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 12,
-    marginBottom: 12,
-    borderRadius: 6,
-  },
-});

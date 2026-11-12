@@ -1,9 +1,11 @@
 // src/componentes/Perfil.js
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Button, Alert, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { auth } from '../../firebase/firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
+import { estilos, colores } from '../tema';
 
 export default function Perfil() {
   const [nombre, setNombre] = useState('');
@@ -46,59 +48,56 @@ export default function Perfil() {
     }
   };
 
-  if (cargando) return <Text style={styles.cargando}>Cargando...</Text>;
+  if (cargando) {
+    return (
+      <View style={[estilos.pantalla, { flex: 1 }]}>
+        <ActivityIndicator size="large" color={colores.primario} />
+        <Text style={{ marginTop: 12, color: colores.textoSuave }}>Cargando...</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.contenedor}>
+    <ScrollView contentContainerStyle={estilos.pantalla}>
+      <View style={estilos.tarjeta}>
+        <View style={estilos.logo}>
+          <Ionicons name="person" size={34} color={colores.primario} />
+        </View>
+        <Text style={estilos.titulo}>Perfil del Usuario</Text>
+        <Text style={estilos.subtitulo}>{auth.currentUser?.email}</Text>
 
-      <Text style={styles.titulo}>Perfil del Usuario</Text>
+        <Text style={estilos.etiqueta}>Nombre</Text>
+        <TextInput
+          style={estilos.input}
+          placeholder="Nombre"
+          placeholderTextColor={colores.textoSuave}
+          value={nombre}
+          onChangeText={setNombre}
+        />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Nombre"
-        value={nombre}
-        onChangeText={setNombre}
-      />
+        <Text style={estilos.etiqueta}>Fecha de nacimiento</Text>
+        <TextInput
+          style={estilos.input}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor={colores.textoSuave}
+          value={fecha}
+          onChangeText={setFecha}
+        />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Fecha de nacimiento (YYYY-MM-DD)"
-        value={fecha}
-        onChangeText={setFecha}
-      />
+        <Text style={estilos.etiqueta}>Teléfono</Text>
+        <TextInput
+          style={estilos.input}
+          placeholder="Teléfono"
+          placeholderTextColor={colores.textoSuave}
+          value={telefono}
+          onChangeText={setTelefono}
+          keyboardType="phone-pad"
+        />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Teléfono"
-        value={telefono}
-        onChangeText={setTelefono}
-        keyboardType="phone-pad"
-      />
-      <Button title="Guardar cambios" onPress={actualizarDatos} />
-    </View>
+        <TouchableOpacity style={estilos.boton} onPress={actualizarDatos}>
+          <Text style={estilos.botonTexto}>Guardar cambios</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  contenedor: {
-    padding: 20,
-    flex: 1,
-    backgroundColor: '#fff'
-  },
-  titulo: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 10,
-    marginBottom: 15,
-    borderRadius: 10,
-  },
-  cargando: {
-    marginTop: 50,
-    textAlign: 'center',
-  },
-});

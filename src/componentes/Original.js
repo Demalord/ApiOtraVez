@@ -1,56 +1,144 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
+// src/componentes/Original.js — Memoria Digimon
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
+  ScrollView, Animated, useWindowDimensions,
+} from 'react-native';
+import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
+import { estilos, colores } from '../tema';
 
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ-:.\' '.split('');
-const MAX_ATTEMPTS = 5;
+const PARES = 6;          // 6 parejas = 12 cartas
+const MAX_FALLOS = 10;    // si fallas 10 veces, pierdes
 const TOTAL_DIGIMON = 1488;
+const COLUMNAS = 4;
 
-// Busca un Digimon aleatorio cuyo nombre se pueda escribir con el teclado (ALPHABET)
-const obtenerDigimonAleatorio = async () => {
-  while (true) {
+// Mezcla un arreglo (algoritmo Fisher-Yates)
+const mezclar = (arr) => {
+  const copia = [...arr];
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia;
+};
+
+// Trae un Digimon por id (con imagen)
+const obtenerDigimon = async (id) => {
+  const res = await fetch(`https://digi-api.com/api/v1/digimon/${id}`);
+  const data = await res.json();
+  if (!data.images?.length) throw new Error('Sin imagen');
+  return { id: data.id, nombre: data.name, imagen: data.images[0].href };
+};
+
+// Arma el tablero: PARES Digimon distintos, cada uno duplicado y mezclado
+const crearTablero = async () => {
+  // Elige PARES ids distintos y los pide todos a la vez (en paralelo)
+  const ids = new Set();
+  while (ids.size < PARES) ids.add(Math.floor(Math.random() * TOTAL_DIGIMON) + 1);
+  const resultados = await Promise.allSettled([...ids].map(obtenerDigimon));
+  const digimons = resultados.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+
+  // Si alguno falló, se completa con otros
+  while (digimons.length < PARES) {
     const id = Math.floor(Math.random() * TOTAL_DIGIMON) + 1;
+    if (digimons.some((d) => d.id === id)) continue;
     try {
-      const response = await fetch(`https://digi-api.com/api/v1/digimon/${id}`);
-      const data = await response.json();
-      const nombre = data.name.toUpperCase();
-      const valido = nombre.split('').every((l) => ALPHABET.includes(l));
-      if (valido && data.images?.length) {
-        return { nombre, id: data.id, imagen: data.images[0].href };
-      }
+      digimons.push(await obtenerDigimon(id));
     } catch (err) {
       console.error('Error al obtener el Digimon:', err);
     }
   }
+
+  // Pre-carga las imágenes para que al voltear aparezcan de inmediato
+  // (máximo 3 s de espera para no quedarse "Barajando cartas..." si la red está lenta)
+  await Promise.race([
+    Image.prefetch(digimons.map((d) => d.imagen)).catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 3000)),
+  ]);
+
+  const cartas = digimons.flatMap((d) => [
+    { clave: `${d.id}-a`, ...d },
+    { clave: `${d.id}-b`, ...d },
+  ]);
+  return mezclar(cartas);
 };
 
-export default function JuegoDigimon() {
-  const [digimonName, setDigimonName] = useState('');
-  const [digimonImage, setDigimonImage] = useState('');
-  const [digimonId, setDigimonId] = useState('');
-  const [guessedLetters, setGuessedLetters] = useState([]);
-  const [wrongGuesses, setWrongGuesses] = useState(0);
+// Una carta con animación de volteo (se encoge en X, cambia de cara y se abre)
+function Carta({ carta, visible, encontrada, onPress, tamano }) {
+  const escala = useRef(new Animated.Value(1)).current;
+  const [mostrarFrente, setMostrarFrente] = useState(visible);
+
+  useEffect(() => {
+    if (visible === mostrarFrente) return;
+    Animated.timing(escala, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => {
+      setMostrarFrente(visible);
+      Animated.timing(escala, { toValue: 1, duration: 120, useNativeDriver: true }).start();
+    });
+  }, [visible]);
+
+  const alto = Math.round(tamano * 1.25);
+
+  return (
+    <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={{ margin: 4 }}>
+      <Animated.View
+        style={[
+          styles.carta,
+          { width: tamano, height: alto, transform: [{ scaleX: escala }] },
+          mostrarFrente
+            ? [styles.frente, encontrada && styles.frenteEncontrada]
+            : styles.reverso,
+        ]}
+      >
+        {mostrarFrente ? (
+          <>
+            <Image
+              source={{ uri: carta.imagen }}
+              style={{ width: tamano * 0.85, height: alto * 0.68 }}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+            />
+            <Text style={styles.cartaNombre} numberOfLines={1}>{carta.nombre}</Text>
+          </>
+        ) : (
+          <Ionicons name="egg" size={tamano * 0.4} color="#FFFFFF" />
+        )}
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+export default function MemoriaDigimon() {
+  const [cartas, setCartas] = useState([]);
+  const [volteadas, setVolteadas] = useState([]);     // índices boca arriba en este turno
+  const [encontradas, setEncontradas] = useState([]); // ids de Digimon ya emparejados
+  const [intentos, setIntentos] = useState(0);
+  const [fallos, setFallos] = useState(0);
+  const [bloqueado, setBloqueado] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [gameWon, setGameWon] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [userWin, setUserWin] = useState(0);
   const [userLose, setUserLose] = useState(0);
-  const [uid, setUid] = useState(null); // Agrega estado uid correctamente
+  const [uid, setUid] = useState(null);
+
+  const { width } = useWindowDimensions();
+  const anchoTablero = Math.min(width, 560) - 40 - 56; // pantalla - padding pantalla - padding tarjeta
+  const tamanoCarta = Math.floor(anchoTablero / COLUMNAS) - 8;
 
   // Escuchar el login del usuario
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUid(user.uid);
-      }
+      if (user) setUid(user.uid);
     });
     return unsubscribe;
   }, []);
 
-  // Obtener datos del usuario
+  // Obtener estadísticas del usuario
   useEffect(() => {
     if (!uid) return;
     const traerDatos = async () => {
@@ -62,23 +150,21 @@ export default function JuegoDigimon() {
         setUserLose(data.perdidos || 0);
       } else {
         await setDoc(docRef, { ganados: 0, perdidos: 0 }); // inicializar si no existe
-        setUserWin(0);
-        setUserLose(0);
       }
-      setLoading(false);
     };
     traerDatos();
   }, [uid]);
 
-  const guardarResultado = async (acierto) => {
+  const guardarResultado = async (gano, totalIntentos, paresEncontrados) => {
     if (!uid) return;
     const fecha = new Date().toISOString();
 
     const resultado = {
       uid,
-      digimon: digimonName,
-      aciertos: acierto ? 1 : 0,
-      errores: acierto ? 0 : 1,
+      juego: 'memoria',
+      gano,
+      intentos: totalIntentos,
+      pares: paresEncontrados,
       fecha,
     };
 
@@ -87,158 +173,154 @@ export default function JuegoDigimon() {
       await setDoc(doc(db, 'resultados', `${uid}_${fecha}`), resultado);
 
       // Actualizar campos ganados/perdidos del usuario
-      const docRef = doc(db, 'usuarios', uid);
-      await updateDoc(docRef, {
-        ganados: acierto ? userWin + 1 : userWin,
-        perdidos: !acierto ? userLose + 1 : userLose,
+      await updateDoc(doc(db, 'usuarios', uid), {
+        ganados: gano ? userWin + 1 : userWin,
+        perdidos: !gano ? userLose + 1 : userLose,
       });
     } catch (e) {
       console.error('Error al guardar resultado:', e);
     }
   };
 
-  useEffect(() => {
-    const getRandomDigimon = async () => {
-      const digimon = await obtenerDigimonAleatorio();
-      setDigimonName(digimon.nombre);
-      setDigimonId(digimon.id);
-      setDigimonImage(digimon.imagen);
-      setLoading(false);
-    };
-    getRandomDigimon();
-  }, []);
-
-  const handleLetterClick = async (letter) => {
-    if (guessedLetters.includes(letter) || gameOver || gameWon) return;
-
-    const updatedGuessed = [...guessedLetters, letter];
-    setGuessedLetters(updatedGuessed);
-
-    if (!digimonName.includes(letter)) {
-      const newWrongGuesses = wrongGuesses + 1;
-      setWrongGuesses(newWrongGuesses);
-      if (newWrongGuesses >= MAX_ATTEMPTS) {
-        setGameOver(true);
-        setUserLose(userLose + 1);
-        await guardarResultado(false);
-      }
-    } else {
-      const allCorrect = digimonName
-        .split('')
-        .every((l) => updatedGuessed.includes(l));
-      if (allCorrect) {
-        setGameWon(true);
-        setUserWin(userWin + 1);
-        await guardarResultado(true);
-      }
-    }
-  };
-
-  const renderWord = () =>
-    digimonName.split('').map((letter, index) => (
-      <Text key={index} style={styles.letter}>
-        {guessedLetters.includes(letter) || gameOver || gameWon ? letter : '_'}
-      </Text>
-    ));
-
-  const restartGame = async () => {
-    setGuessedLetters([]);
-    setWrongGuesses(0);
+  const nuevaPartida = async () => {
+    setLoading(true);
+    setVolteadas([]);
+    setEncontradas([]);
+    setIntentos(0);
+    setFallos(0);
+    setBloqueado(false);
     setGameOver(false);
     setGameWon(false);
-    setLoading(true);
-    setDigimonName('');
-    setDigimonId('');
-    setDigimonImage('');
-
-    // vuelve a buscar un Digimon nuevo
-    const digimon = await obtenerDigimonAleatorio();
-    setDigimonName(digimon.nombre);
-    setDigimonId(digimon.id);
-    setDigimonImage(digimon.imagen);
+    setCartas(await crearTablero());
     setLoading(false);
   };
 
+  useEffect(() => {
+    nuevaPartida();
+  }, []);
+
+  const handleCarta = (indice) => {
+    const carta = cartas[indice];
+    if (bloqueado || gameOver || gameWon) return;
+    if (volteadas.includes(indice) || encontradas.includes(carta.id)) return;
+
+    const nuevas = [...volteadas, indice];
+    setVolteadas(nuevas);
+    if (nuevas.length < 2) return;
+
+    // Se voltearon 2 cartas: comparar
+    const totalIntentos = intentos + 1;
+    setIntentos(totalIntentos);
+    const [a, b] = nuevas.map((i) => cartas[i]);
+
+    if (a.id === b.id) {
+      const nuevasEncontradas = [...encontradas, a.id];
+      setEncontradas(nuevasEncontradas);
+      setVolteadas([]);
+      if (nuevasEncontradas.length === PARES) {
+        setGameWon(true);
+        setUserWin(userWin + 1);
+        guardarResultado(true, totalIntentos, PARES);
+      }
+    } else {
+      const nuevosFallos = fallos + 1;
+      setFallos(nuevosFallos);
+      setBloqueado(true);
+      setTimeout(() => {
+        setVolteadas([]);
+        setBloqueado(false);
+        if (nuevosFallos >= MAX_FALLOS) {
+          setGameOver(true);
+          setUserLose(userLose + 1);
+          guardarResultado(false, totalIntentos, encontradas.length);
+        }
+      }, 900);
+    }
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Adivina el Digimon</Text>
-      <Text style={styles.stats}>Ganados: {userWin} | Perdidos: {userLose}</Text>
-      {loading ? (
-        <ActivityIndicator size="large" />
-      ) : (
-        <>
-          <Text>{digimonId}</Text>
-          <Image source={{ uri: digimonImage }} style={styles.image} />
-          <View style={styles.wordContainer}>{renderWord()}</View>
+    <ScrollView contentContainerStyle={estilos.pantalla}>
+      <View style={[estilos.tarjeta, { maxWidth: 560, alignItems: 'center' }]}>
+        <Text style={estilos.titulo}>Memoria Digimon</Text>
+        <Text style={[estilos.subtitulo, { marginBottom: 0 }]}>Encuentra las {PARES} parejas</Text>
 
-          <View style={styles.keyboard}>
-            {ALPHABET.map((letter) => (
-              <TouchableOpacity
-                key={letter}
-                onPress={() => handleLetterClick(letter)}
-                disabled={guessedLetters.includes(letter) || gameOver || gameWon}
-                style={[
-                  styles.key,
-                  guessedLetters.includes(letter) && styles.keyDisabled,
-                ]}
-              >
-                <Text>{letter === ' ' ? '␣' : letter}</Text>
-              </TouchableOpacity>
-            ))}
+        <View style={styles.statsFila}>
+          <View style={[styles.stat, { backgroundColor: '#DCFCE7' }]}>
+            <Text style={[styles.statNumero, { color: colores.exito }]}>{userWin}</Text>
+            <Text style={styles.statTexto}>Ganados</Text>
           </View>
+          <View style={[styles.stat, { backgroundColor: '#FEE2E2' }]}>
+            <Text style={[styles.statNumero, { color: colores.error }]}>{userLose}</Text>
+            <Text style={styles.statTexto}>Perdidos</Text>
+          </View>
+        </View>
 
-          <Text style={styles.attempts}>
-            Fallos: {wrongGuesses} / {MAX_ATTEMPTS}
-          </Text>
+        {loading ? (
+          <View style={{ marginVertical: 60, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colores.primario} />
+            <Text style={{ marginTop: 12, color: colores.textoSuave }}>Barajando cartas...</Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.marcador}>
+              <Text style={styles.marcadorTexto}>Parejas: {encontradas.length}/{PARES}</Text>
+              <Text style={styles.marcadorTexto}>Intentos: {intentos}</Text>
+            </View>
 
-          {gameOver && (
-            <Text style={styles.lost}>💀 ¡Perdiste! Era: {digimonName}</Text>
-          )}
-          {gameWon && <Text style={styles.won}>🎉 ¡Ganaste!</Text>}
+            <View style={styles.barra}>
+              <View style={[styles.barraRelleno, { width: `${(fallos / MAX_FALLOS) * 100}%` }]} />
+            </View>
+            <Text style={styles.fallos}>Fallos: {fallos} / {MAX_FALLOS}</Text>
 
-          {(gameOver || gameWon) && (
-            <TouchableOpacity style={styles.button} onPress={restartGame}>
-              <Text style={styles.buttonText}>Jugar otra vez</Text>
-            </TouchableOpacity>
-          )}
-        </>
-      )}
+            <View style={[styles.tablero, { width: (tamanoCarta + 8) * COLUMNAS }]}>
+              {cartas.map((carta, i) => (
+                <Carta
+                  key={carta.clave}
+                  carta={carta}
+                  tamano={tamanoCarta}
+                  visible={gameOver || volteadas.includes(i) || encontradas.includes(carta.id)}
+                  encontrada={encontradas.includes(carta.id)}
+                  onPress={() => handleCarta(i)}
+                />
+              ))}
+            </View>
+
+            {gameOver && <Text style={styles.lost}>💀 ¡Perdiste! Se acabaron los intentos</Text>}
+            {gameWon && <Text style={styles.won}>🎉 ¡Ganaste en {intentos} intentos!</Text>}
+
+            {(gameOver || gameWon) && (
+              <TouchableOpacity style={[estilos.boton, { alignSelf: 'stretch' }]} onPress={nuevaPartida}>
+                <Text style={estilos.botonTexto}>Jugar otra vez</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, alignItems: 'center' },
-  title: { fontSize: 24, marginBottom: 10 },
-  image: { width: 150, height: 150, marginVertical: 10 },
-  stats: { marginBottom: 10, fontSize: 16 },
-  wordContainer: { flexDirection: 'row', marginBottom: 20, flexWrap: 'wrap' },
-  letter: { fontSize: 28, marginHorizontal: 4 },
-  keyboard: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  statsFila: { flexDirection: 'row', gap: 12, marginTop: 16, marginBottom: 12 },
+  stat: { borderRadius: 12, paddingVertical: 8, paddingHorizontal: 20, alignItems: 'center' },
+  statNumero: { fontSize: 22, fontWeight: '800' },
+  statTexto: { fontSize: 12, color: colores.textoSuave, fontWeight: '600' },
+  marcador: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginBottom: 8 },
+  marcadorTexto: { fontSize: 14, fontWeight: '700', color: colores.azul },
+  barra: { alignSelf: 'stretch', height: 8, backgroundColor: colores.borde, borderRadius: 4, overflow: 'hidden' },
+  barraRelleno: { height: '100%', backgroundColor: colores.error },
+  fallos: { fontSize: 13, color: colores.textoSuave, marginTop: 6, marginBottom: 12 },
+  tablero: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
+  carta: {
+    borderRadius: 12,
     justifyContent: 'center',
-    marginBottom: 20,
-  },
-  key: {
-    backgroundColor: '#eee',
-    padding: 10,
-    margin: 4,
-    borderRadius: 4,
-    width: 40,
     alignItems: 'center',
+    overflow: 'hidden',
   },
-  keyDisabled: {
-    backgroundColor: '#ccc',
-  },
-  attempts: { fontSize: 16, marginBottom: 10 },
-  lost: { color: 'red', fontSize: 18 },
-  won: { color: 'green', fontSize: 18 },
-  button: {
-    marginTop: 10,
-    padding: 10,
-    backgroundColor: '#0066cc',
-    borderRadius: 5,
-  },
-  buttonText: { color: 'white', fontWeight: 'bold' },
+  reverso: { backgroundColor: colores.primario, borderWidth: 3, borderColor: '#FDBA74' },
+  frente: { backgroundColor: '#FFF7ED', borderWidth: 2, borderColor: colores.borde, padding: 4 },
+  frenteEncontrada: { backgroundColor: '#DCFCE7', borderColor: colores.exito },
+  cartaNombre: { fontSize: 10, fontWeight: '700', color: colores.texto, marginTop: 2, paddingHorizontal: 2 },
+  lost: { color: colores.error, fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
+  won: { color: colores.exito, fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
 });
